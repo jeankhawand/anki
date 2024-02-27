@@ -9,15 +9,13 @@ on:
         type: string
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - macos-14
-        architecture:
-          - ${{ matrix.os == 'ubuntu-latest' && 'amd64' || matrix.os == 'macos-latest' && 'arm64' }}  
+        platform:
+          - linux/amd64
+          - linux/arm64
     steps:
       - name: Prepare
         run: |
