@@ -1,10 +1,12 @@
 name: Publish Docker Image
 
-on:
-  push:
-    branches:
-      - publish-registry
-
+on: 
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'enter tag you want to publish e.g. 23.2.1'
+        required: true
+        type: string
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -18,6 +20,7 @@ jobs:
       - name: Prepare
         run: |
           platform=${{ matrix.platform }}
+          echo "Building Version" ${{ inputs.tag }}
           echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV 
 
       - name: Checkout code
@@ -28,6 +31,9 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ secrets.REGISTRY_IMAGE }}
+          tags: |
+            ${{ inputs.tag }}
+            latest
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -47,6 +53,8 @@ jobs:
         with:
           context: ./docs/syncserver
           file: ./docs/syncserver/Dockerfile
+          build-args: |
+            ANKI_VERSION=${{ inputs.tag }}
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ secrets.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
