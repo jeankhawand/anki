@@ -17,7 +17,7 @@ jobs:
           - ubuntu-latest
           - macos-14
         architecture:
-          - ${{ matrix.os == 'ubuntu-latest' && 'amd64' || 'arm64' }}
+          - ${{ matrix.os == 'ubuntu-latest' && 'amd64' || matrix.os == 'macos-latest' && 'arm64' }}  
     steps:
       - name: Prepare
         run: |
