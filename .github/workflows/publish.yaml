@@ -33,7 +33,6 @@ jobs:
           images: ${{ secrets.REGISTRY_IMAGE }}
           tags: |
             ${{ inputs.tag }}
-            latest
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
