@@ -1,0 +1,223 @@
+name: Build and publish sync-server image
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'enter ANKI_VERSION tag'
+        required: true
+        type: string
+      image_type:
+        description: 'Select the type of image to build'
+        required: true
+        default: alpine
+        type: choice
+        options:
+          - alpine
+          - both
+          - distroless
+jobs:
+  build-alpine:
+    if: ${{ github.event.inputs.image_type == 'alpine' || github.event.inputs.image_type == 'both' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+    steps:
+      - name: Prepare
+        run: |
+          platform=${{ matrix.platform }}
+          echo "Building Version" ${{ inputs.tag }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV 
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.REPO_NAME }}
+          tags: |
+            ${{ inputs.tag }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Build and push by digest
+        id: build_alpine
+        uses: docker/build-push-action@v5
+        with:
+          context: ./docs/syncserver
+          file: ./docs/syncserver/Dockerfile
+          build-args: |
+            ANKI_VERSION=${{ inputs.tag }}
+          platforms: ${{ matrix.platform }}
+          sbom: true
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ secrets.REPO_NAME }},push-by-digest=true,name-canonical=true,push=true
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build_alpine.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"          
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-alpine-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-alpine:
+    if: ${{ github.event.inputs.image_type == 'alpine' || github.event.inputs.image_type == 'both' }}
+    runs-on: ubuntu-latest
+    needs:
+      - build-alpine
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-alpine-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.REPO_NAME }}
+          tags: |
+            ${{ inputs.tag }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ secrets.REPO_NAME }}@sha256:%s ' *)          
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ secrets.REPO_NAME }}:${{ steps.meta.outputs.version }}   
+
+
+  build-distroless:
+    if: ${{ github.event.inputs.image_type == 'distroless' || github.event.inputs.image_type == 'both' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+    steps:
+      - name: Prepare
+        run: |
+          platform=${{ matrix.platform }}
+          echo "Building Version" ${{ inputs.tag }}-distroless
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV 
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.REPO_NAME }}
+          tags: |
+            ${{ inputs.tag }}-distroless
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Build and push by digest
+        id: build_distroless
+        uses: docker/build-push-action@v5
+        with:
+          context: ./docs/syncserver
+          file: ./docs/syncserver/Dockerfile.distroless
+          build-args: |
+            ANKI_VERSION=${{ inputs.tag }}
+          platforms: ${{ matrix.platform }}
+          sbom: true
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ secrets.REPO_NAME }},push-by-digest=true,name-canonical=true,push=true
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build_distroless.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"          
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-distroless-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-distroless:
+    if: ${{ github.event.inputs.image_type == 'distroless' || github.event.inputs.image_type == 'both' }}
+    runs-on: ubuntu-latest
+    needs:
+      - build-distroless
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-distroless-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.REPO_NAME }}
+          tags: |
+            ${{ inputs.tag }}-distroless
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ secrets.REPO_NAME }}@sha256:%s ' *)          
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ secrets.REPO_NAME }}:${{ steps.meta.outputs.version }}  
