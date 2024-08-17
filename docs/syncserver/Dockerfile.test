@@ -1,0 +1,36 @@
+FROM rust:1.80 AS builder
+
+ARG ANKI_VERSION
+
+RUN apt-get update && apt-get install -y build-essential protobuf-compiler && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy the entire context (your application code) to /app in the container
+COPY . /app
+
+# Set the working directory to the workspace containing `rslib/sync`
+WORKDIR /app/rslib/sync
+# fix https://docs.rs/prost-build/latest/prost_build/#sourcing-protoc
+ENV PROTOC=/usr/bin/protoc
+# Build the project in release mode
+RUN cargo build --release
+
+FROM gcr.io/distroless/cc-debian12
+
+COPY --from=builder /app/target/release/anki-sync-server /
+
+# RUN chmod +x /anki-sync-server
+
+ENV SYNC_PORT=${SYNC_PORT:-"8080"}
+
+EXPOSE ${SYNC_PORT}
+
+CMD ["./anki-sync-server"]
+
+# This health check will work for Anki versions 24.06.3 and newer.
+# For older versions, it may incorrectly report an unhealthy status, which should not be the case.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+CMD ["./anki-sync-server", "--healthcheck"]
+
+LABEL maintainer="Jean Khawand <jk@jeankhawand.com>"
